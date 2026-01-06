@@ -18,12 +18,16 @@ void _start() {
     while (1) {
         // input polling
         key_poll();
+        if (key_is_down(BUTTON_A)) {
+            goto cleanup;
+        }
 
         // game logic
         run();
         presentVideoBuffer();
         wait_ticks(1000 / 60);
     }
+cleanup:
     set_tty_mode(TTY_MODE_COOKED);
     set_graphics_mode(false);
 
