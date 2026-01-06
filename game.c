@@ -1,31 +1,27 @@
 #include "game.h"
 #include "assets/bg.h"
 #include "assets/colors.h"
-#include "assets/combo1.h"
-#include "assets/combo2.h"
-#include "assets/combo3.h"
-#include "assets/combo4.h"
-#include "assets/drop.h"
 #include "assets/title.h"
 
-#include "audio.h"
+
 #include "gba.h"
-#include <stdio.h>
+
+#include "syscall_defs.h"
+#include "util.h"
 
 static u16 board[BOARD_HEIGHT + 1][BOARD_WIDTH + 2];
 
-static u16 __attribute__((section(".ewram"))) chunks[CHUNKS_HEIGHT + 1][CHUNKS_WIDTH];
+static u16 chunks[CHUNKS_HEIGHT + 1][CHUNKS_WIDTH];
 
 static enum state state = TITLE;
-static int score;
+static unsigned int score;
 static int clearFrame;
 static int hasUpdated;
 static int comboMult;
 static int combo;
 static int toClearX, toClearY;
 static int fillNum;
-static u16
-    __attribute__((section(".ewram"))) visited[BOARD_HEIGHT][BOARD_WIDTH];
+static u16 visited[BOARD_HEIGHT][BOARD_WIDTH];
 
 static int highscores[4];
 
@@ -45,13 +41,14 @@ static inline tetrimino newPiece(void) {
 }
 
 void init(void) {
-    volatile u32 zero = 0;
+    // volatile u32 zero = 0;
 
     // zero board
-    DMA[3].src = &zero;
-    DMA[3].dst = board;
-    DMA[3].cnt = ((BOARD_WIDTH + 2) * (BOARD_HEIGHT + 1) / 2) | DMA_ON |
-                 DMA_32 | DMA_SOURCE_FIXED;
+    memset(board, 0, ((BOARD_WIDTH + 2) * (BOARD_HEIGHT + 1) * 2));
+    // DMA[3].src = &zero;
+    // DMA[3].dst = board;
+    // DMA[3].cnt = ((BOARD_WIDTH + 2) * (BOARD_HEIGHT + 1) / 2) | DMA_ON |
+    //              DMA_32 | DMA_SOURCE_FIXED;
 
     // fill borders
     for (int y = 0; y <= BOARD_HEIGHT; y++) {
@@ -63,9 +60,7 @@ void init(void) {
     }
 
     // zero chunks
-    DMA[3].dst = chunks;
-    DMA[3].cnt = (((CHUNKS_WIDTH) * (CHUNKS_HEIGHT + 1))) | DMA_ON | DMA_32 |
-                 DMA_SOURCE_FIXED;
+    memset(chunks, 0, (CHUNKS_WIDTH) * (CHUNKS_HEIGHT + 1) * 2);
 
     pieceCurr = newPiece();
     pieceNext = newPiece();
@@ -77,14 +72,10 @@ void init(void) {
     combo = 0;
     fillNum = 1;
 
-    // play audio
-    reset_music();
-    init_audio();
-    loop_music();
 }
 
 void drawBoard(void) {
-    drawImageDMA32(0, BOARD_X_OFFSET, BOARD_WIDTH + 2, BOARD_HEIGHT,
+    drawImageDMA(0, BOARD_X_OFFSET, BOARD_WIDTH + 2, BOARD_HEIGHT,
                    (const unsigned short *)board);
 }
 
@@ -100,7 +91,7 @@ void drawPiece(void) {
 
 void drawUI(void) {
     // next piece
-    drawRectDMA32(NEXT_PIECE_OFFSET_Y, NEXT_PIECE_OFFSET_X, 32, 32, 0x1884);
+    drawRectDMA(NEXT_PIECE_OFFSET_Y, NEXT_PIECE_OFFSET_X, 32, 32, 0x1884);
     for (int i = 0; i < 4; i++) {
         const int *cell = PIECES[pieceNext.type][pieceNext.rotation][i];
 
@@ -112,8 +103,8 @@ void drawUI(void) {
 
 void drawScore(void) {
     char score_str[10];
-    snprintf(score_str, 10, "%d", score);
-    drawRectDMA32(SCORE_OFFSET_Y, SCORE_OFFSET_X, 50, 8, 0x1884);
+    fmt_u32(score, score_str);
+    drawRectDMA(SCORE_OFFSET_Y, SCORE_OFFSET_X, 50, 8, 0x1884);
     drawString(SCORE_OFFSET_Y, SCORE_OFFSET_X, score_str, COL_WHITE);
 }
 
@@ -134,7 +125,7 @@ void drawChunks(void) {
 
 void fill(int x, int y, const int col) {
     // new stack
-    static int stack[BOARD_HEIGHT][2];
+    static int stack[BOARD_WIDTH * BOARD_HEIGHT][2];
     int sz = 0;
 
     // add x,y to stack
@@ -182,7 +173,7 @@ void fill(int x, int y, const int col) {
 }
 
 int contour(const int x, const int y, const int col, const int targ, int dir) {
-    static const int __attribute__((section(".vram"))) offset[4][3][2] = {
+    static const int offset[4][3][2] = {
         {{-1, -1}, {0, -1}, {1, -1}},
         {{1, -1}, {1, 0}, {1, 1}},
         {{1, 1}, {0, 1}, {-1, 1}},
@@ -266,7 +257,7 @@ int contourR(void) {
     return 0;
 }
 
-static inline void __attribute__((target("arm"))) updateWorld(void) {
+static inline void updateWorld(void) {
     for (int y = CHUNKS_HEIGHT - 1; y > 1; y--) {
         for (int x = 0; x < CHUNKS_WIDTH; x++) {
             if (!chunks[y][x])
@@ -361,7 +352,6 @@ int updatePiece(void) {
         for (int offset = 0; offset < 8; offset++) {
             // check if hit sand
             if (board[y][x + offset + 1]) {
-                play_sfx(drop, drop_bytes);
                 return 1;
             }
         }
@@ -373,11 +363,12 @@ int updatePiece(void) {
 }
 
 void restart(void) {
-    reset_music();
     state = TITLE;
 }
 
 void run(void) {
+    // wait_ticks(1);
+    // state = START;
     // local vars
     int cleared = 0;
 
@@ -387,6 +378,7 @@ void run(void) {
 
     if (key_hit(BUTTON_START))
         state = START;
+
 
     switch (state) {
     case TITLE:
@@ -407,12 +399,6 @@ void run(void) {
         drawUI();
         drawScore();
 
-        // sync
-        while (SCANLINECOUNTER > 175)
-            ;
-        while (SCANLINECOUNTER < 175)
-            ;
-
         break;
 
     case FALL:
@@ -424,12 +410,7 @@ void run(void) {
 
         updateWorld();
 
-        while (SCANLINECOUNTER > 205)
-            ;
         state = FLOOD;
-
-        while (SCANLINECOUNTER < 145)
-            ;
 
         drawBoard();
         drawPiece();
@@ -441,7 +422,6 @@ void run(void) {
             state = SPAWN;
             break;
         }
-        int a = SCANLINECOUNTER;
 
         if (contourL() || contourR()) {
             state = CLEAR1;
@@ -449,16 +429,8 @@ void run(void) {
             state = FALL;
         }
 
-        while (SCANLINECOUNTER > a)
-            ;
-
-        while (SCANLINECOUNTER < 145)
-            ;
-
-        dbgs = SCANLINECOUNTER;
         drawBoard();
         drawPiece();
-        dbge = SCANLINECOUNTER;
 
         break;
 
@@ -477,10 +449,10 @@ void run(void) {
                 if (pieceCurr.y + cell[1] + y >= BOARD_HEIGHT ||
                     pieceCurr.y + cell[1] + y < 0)
                     break;
-                DMA[3].src = &TILES[pieceCurr.color][8 * y];
-                DMA[3].dst = &board[pieceCurr.y + cell[1] + y]
-                                   [pieceCurr.x + cell[0] + 1];
-                DMA[3].cnt = 8 | DMA_ON | DMA_16;
+                memcpy((char *) &board[pieceCurr.y + cell[1] + y] [pieceCurr.x + cell[0] + 1], (char *) &TILES[pieceCurr.color][8 * y], 8 * 2);
+                // DMA[3].src = &TILES[pieceCurr.color][8 * y];
+                // DMA[3].dst = &board[pieceCurr.y + cell[1] + y] [pieceCurr.x + cell[0] + 1];
+                // DMA[3].cnt = 8 | DMA_ON | DMA_16;
             }
             int cx = ((pieceCurr.x + cell[0]) / CHUNK_SIZE);
             int cy = ((pieceCurr.y + cell[1]) / CHUNK_SIZE);
@@ -497,13 +469,8 @@ void run(void) {
 
         state = SPAWN2;
 
-        while (SCANLINECOUNTER >= 145)
-            ;
-        while (SCANLINECOUNTER < 145)
-            ;
-
         const int yOffset = 1;
-        drawImageDMA32(yOffset, BOARD_X_OFFSET, BOARD_WIDTH + 2,
+        drawImageDMA(yOffset, BOARD_X_OFFSET, BOARD_WIDTH + 2,
                        BOARD_HEIGHT - yOffset, (const unsigned short *)board);
 
         for (int i = 0; i < 4; i++) {
@@ -533,15 +500,6 @@ void run(void) {
     case SPAWN2:
         state = FLOOD;
 
-        // stall 2 frames
-        int i = 3;
-        while (i--) {
-            while (SCANLINECOUNTER >= 145)
-                ;
-            while (SCANLINECOUNTER < 145)
-                ;
-        }
-
         drawBoard();
         drawPiece();
 
@@ -568,15 +526,6 @@ void run(void) {
 
         score += combo * (comboMult / 220) * cleared;
 
-        if (combo > 3) {
-            play_sfx(combo4, combo4_bytes);
-        } else if (combo > 2) {
-            play_sfx(combo3, combo3_bytes);
-        } else if (combo > 1) {
-            play_sfx(combo2, combo2_bytes);
-        } else {
-            play_sfx(combo1, combo1_bytes);
-        }
         state = CLEAR2;
 
         waitForVBlank();
@@ -629,27 +578,25 @@ void run(void) {
                 }
             }
         }
-        volatile u32 one = 1;
 
-        DMA[3].src = &one;
-        DMA[3].dst = chunks;
-        DMA[3].cnt = (((CHUNKS_WIDTH) * (CHUNKS_HEIGHT + 1))) | DMA_ON |
-                     DMA_32 | DMA_SOURCE_FIXED;
+        memset((char *) chunks, 1, ((CHUNKS_WIDTH) * (CHUNKS_HEIGHT + 1)) * 2);
+
+        // volatile u32 one = 1;
+        //
+        // DMA[3].src = &one;
+        // DMA[3].dst = chunks;
+        // DMA[3].cnt = (((CHUNKS_WIDTH) * (CHUNKS_HEIGHT + 1))) | DMA_ON |
+        //              DMA_32 | DMA_SOURCE_FIXED;
 
         state = FALL;
 
-        while (SCANLINECOUNTER >= 145)
-            ;
-        while (SCANLINECOUNTER < 145)
-            ;
-
         drawBoard();
         drawPiece();
+        // while(1);
 
         break;
 
     case GAMEOVER:
-        stop_music();
 
         for (unsigned int i = 0; i < sizeof(highscores) / sizeof(int); i++) {
             if (score < highscores[i])
@@ -664,4 +611,5 @@ void run(void) {
 
         break;
     }
+
 }

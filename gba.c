@@ -1,8 +1,17 @@
 #include "gba.h"
+#include "util.h"
+#include "malloc.h"
+#include "syscall_defs.h"
 
 u16 __key_curr = 0, __key_prev = 0;
 
-volatile unsigned short *videoBuffer = (volatile unsigned short *)0x6000000;
+volatile u32 *videoBuffer;
+void initVideoBuffer(void) {
+    videoBuffer = malloc(WIDTH * HEIGHT * sizeof(u32));
+}
+void presentVideoBuffer(void) {
+    draw_pixels((unsigned int *) videoBuffer, HEIGHT, WIDTH);
+}
 u32 vBlankCounter = 0;
 
 /*
@@ -14,13 +23,13 @@ void waitForVBlank(void) {
     // Write a while loop that loops until we're NOT in vBlank anymore:
     // (This prevents counting one VBlank more than once if your app is too
     // fast)
-    while (SCANLINECOUNTER >= 160)
-        ;
+    // while (SCANLINECOUNTER >= 160)
+    //     ;
 
     // (2)
     // Write a while loop that keeps going until we're in vBlank:
-    while (SCANLINECOUNTER < 160)
-        ;
+    // while (SCANLINECOUNTER < 160)
+    //     ;
 
     // (3)
     // Finally, increment the vBlank counter:
@@ -35,93 +44,53 @@ static inline int qran(void) {
 
 inline int randint(int min, int max) { return (qran() * (max - min) >> 15) + min; }
 
+u32 gbaColorToRGB32(u16 gba)
+{
+    u32 r5 = (gba >> 10) & 0x1F;
+    u32 g5 = (gba >> 5)  & 0x1F;
+    u32 b5 =  gba        & 0x1F;
+
+    u32 r8 = (r5 << 3) | (r5 >> 2);
+    u32 g8 = (g5 << 3) | (g5 >> 2);
+    u32 b8 = (b5 << 3) | (b5 >> 2);
+
+    return 0xFF000000 | (r8 << 16) | (g8 << 8) | b8;
+}
+
 /*
   Sets a pixel in the video buffer to a given color.
   Using DMA is NOT recommended. (In fact, using DMA with this function would be
   really slow!)
 */
 inline void setPixel(int row, int col, u16 color) {
-    videoBuffer[row * WIDTH + col] = color;
+    videoBuffer[row * WIDTH + col] = gbaColorToRGB32(color);
 }
 
-/*
-  Draws a rectangle of a given color to the video buffer.
-  The width and height, as well as the top left corner of the rectangle, are
-  passed as parameters. This function can be completed using `height` DMA calls.
-*/
 void drawRectDMA(int row, int col, int width, int height, volatile u16 color) {
     for (int x = 0; x < height; x++) {
-        DMA[3].src = &color;
-        DMA[3].dst = &videoBuffer[OFFSET(row + x, col, WIDTH)];
-        DMA[3].cnt = width | DMA_ON | DMA_SOURCE_FIXED;
+        memset((void *) &videoBuffer[OFFSET(row + x, col, WIDTH)], gbaColorToRGB32(color), width * 4);
     }
 }
 
-void drawRectDMA32(int row, int col, int width, int height, volatile u16 color) {
-    volatile u32 c = color | (color << 16);
-    for (int x = 0; x < height; x++) {
-        DMA[3].src = &c;
-        DMA[3].dst = &videoBuffer[OFFSET(row + x, col, WIDTH)];
-        DMA[3].cnt = (width / 2) | DMA_ON | DMA_SOURCE_FIXED | DMA_32;
-    }
-}
-
-/*
-  Draws a fullscreen image to the video buffer.
-  The image passed in must be of size WIDTH * HEIGHT.
-  This function can be completed using a single DMA call.
-*/
 void drawFullScreenImageDMA(const u16 *image) {
-    DMA[3].src = image;
-    DMA[3].dst = videoBuffer;
-    DMA[3].cnt = (WIDTH * HEIGHT / 2) | DMA_ON | DMA_32;
+    for (int y = 0; y < HEIGHT; y++) {
+        for (int x = 0; x < WIDTH; x++) {
+            videoBuffer[OFFSET(y, x, WIDTH)] = gbaColorToRGB32(image[OFFSET(y, x, WIDTH)]);
+        }
+    }
 }
 
-/*
-  Draws an image to the video buffer.
-  The width and height, as well as the top left corner of the image, are passed
-  as parameters. The image passed in must be of size width * height. Completing
-  this function is required. This function can be completed using `height` DMA
-  calls. Solutions that use more DMA calls will not get credit.
-*/
 void drawImageDMA(int row, int col, int width, int height, const u16 *image) {
-    for (int x = 0; x < height; x++) {
-        DMA[3].src = &image[OFFSET(x, 0, width)];
-        DMA[3].dst = &videoBuffer[OFFSET(row + x, col, WIDTH)];
-        DMA[3].cnt = width | DMA_ON;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int ay = y + row;
+            int ax = x + col;
+            if (ay < 0 || ay >= HEIGHT || ax < 0 || ax >= WIDTH) {
+                continue;
+            }
+            videoBuffer[OFFSET(y + row, x + col, WIDTH)] = gbaColorToRGB32(image[OFFSET(y, x, width)]);
+        }
     }
-}
-
-void drawImageDMA32(int row, int col, int width, int height, const u16 *image) {
-    for (int x = 0; x < height; x++) {
-        DMA[3].src = &image[OFFSET(x, 0, width)];
-        DMA[3].dst = &videoBuffer[OFFSET(row + x, col, WIDTH)];
-        DMA[3].cnt = (width / 2) | DMA_ON | DMA_32;
-    }
-}
-/*
-  Draws a rectangular chunk of a fullscreen image to the video buffer.
-  The width and height, as well as the top left corner of the chunk to be drawn,
-  are passed as parameters. The image passed in must be of size WIDTH * HEIGHT.
-  This function can be completed using `height` DMA calls.
-*/
-void undrawImageDMA(int row, int col, int width, int height, const u16 *image) {
-    for (int x = 0; x < height; x++) {
-        DMA[3].src = &image[OFFSET(row + x, col, WIDTH)];
-        DMA[3].dst = &videoBuffer[OFFSET(row + x, col, WIDTH)];
-        DMA[3].cnt = width | DMA_ON;
-    }
-}
-
-/*
-  Fills the video buffer with a given color.
-  This function can be completed using a single DMA call.
-*/
-void fillScreenDMA(volatile u16 color) {
-    const u32 col = color | (color << 16);
-    DMA[3].src = &col;
-    DMA[3].dst = videoBuffer;
-    DMA[3].cnt = (WIDTH * HEIGHT / 2) | DMA_ON | DMA_SOURCE_FIXED | DMA_32;
 }
 
 /* STRING-DRAWING FUNCTIONS (provided) */

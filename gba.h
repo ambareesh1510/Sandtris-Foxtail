@@ -1,10 +1,8 @@
 #ifndef GBA_H
 #define GBA_H
 
-// ---------------------------------------------------------------------------
-//                       USEFUL TYPEDEFS
-// ---------------------------------------------------------------------------
 /* An unsigned 32-bit (4-byte) type */
+#include "syscall_defs.h"
 typedef unsigned int u32;
 
 /* An unsigned 16-bit (2-byte) type */
@@ -39,7 +37,9 @@ typedef unsigned char u8;
 #define HEIGHT 160
 
 // This is initialized in gba.c
-extern volatile unsigned short *videoBuffer;
+extern volatile u32 *videoBuffer;
+void initVideoBuffer(void);
+void presentVideoBuffer(void);
 
 // ---------------------------------------------------------------------------
 //                       BUTTON INPUT
@@ -55,22 +55,59 @@ extern volatile unsigned short *videoBuffer;
 #define BUTTON_R (1 << 8)
 #define BUTTON_L (1 << 9)
 
-#define KEY_MASK 0x03FF
+#define SC_A 44 // 'z'
+#define SC_B 45 // 'x'
+#define SC_SELECT 28 // '\n'
+#define SC_START 54 // right shift
+#define SC_RIGHT 38 // 'l'
+#define SC_LEFT 36 // 'j'
+#define SC_UP 23 // 'i'
+#define SC_DOWN 37 // 'k'
+#define SC_R 30 // 'a'
+#define SC_L 31 // 's'
+#define SC_BREAK 0b10000000
 
-#define BUTTONS (*(volatile u32 *)0x4000130)
+#define KEY_MASK 0x03FF
 #define KEY_DOWN(key, buttons) (~(buttons) & (key))
 
 // Remember that a button is recently pressed if it wasn't pressed in the last
 // input (oldButtons) but is pressed in the current input. Use the KEY_DOWN
 // macro to check if the button was pressed in the inputs.
-// not used, using inline functions instead
-#define KEY_JUST_PRESSED(key, buttons, oldbuttons) (buttons ^ oldbuttons) & key
-
 extern u16 __key_curr, __key_prev;
 
 static inline void key_poll(void) {
     __key_prev = __key_curr;
-    __key_curr = (~BUTTONS) & KEY_MASK;
+    // TODO: implement this properly
+    unsigned char buf[100];
+    int bytes = read(1, (char *) buf, 100);
+    for (int i = 0; i < bytes; i++) {
+        unsigned char scancode = buf[i];
+        switch (scancode) {
+            case SC_A: __key_curr |= BUTTON_A; break;
+            case SC_B: __key_curr |= BUTTON_B; break;
+            case SC_SELECT: __key_curr |= BUTTON_SELECT; break;
+            case SC_START: __key_curr |= BUTTON_START; break;
+            case SC_RIGHT: __key_curr |= BUTTON_RIGHT; break;
+            case SC_LEFT: __key_curr |= BUTTON_LEFT; break;
+            case SC_UP: __key_curr |= BUTTON_UP; break;
+            case SC_DOWN: __key_curr |= BUTTON_DOWN; break;
+            case SC_R: __key_curr |= BUTTON_R; break;
+            case SC_L: __key_curr |= BUTTON_L; break;
+
+            case (SC_BREAK | SC_A): __key_curr &= ~BUTTON_A; break;
+            case (SC_BREAK | SC_B): __key_curr &= ~BUTTON_B; break;
+            case (SC_BREAK | SC_SELECT): __key_curr &= ~BUTTON_SELECT; break;
+            case (SC_BREAK | SC_START): __key_curr &= ~BUTTON_START; break;
+            case (SC_BREAK | SC_RIGHT): __key_curr &= ~BUTTON_RIGHT; break;
+            case (SC_BREAK | SC_LEFT): __key_curr &= ~BUTTON_LEFT; break;
+            case (SC_BREAK | SC_UP): __key_curr &= ~BUTTON_UP; break;
+            case (SC_BREAK | SC_DOWN): __key_curr &= ~BUTTON_DOWN; break;
+            case (SC_BREAK | SC_R): __key_curr &= ~BUTTON_R; break;
+            case (SC_BREAK | SC_L): __key_curr &= ~BUTTON_L; break;
+            default: break;
+        }
+    }
+    __key_curr = __key_curr & KEY_MASK;
 }
 
 // Basic state checks
@@ -98,48 +135,8 @@ static inline u32 key_released(u32 key) {
 }
 
 // ---------------------------------------------------------------------------
-//                       DMA
-// ---------------------------------------------------------------------------
-typedef struct {
-    const volatile void *src;
-    const volatile void *dst;
-    u32 cnt;
-} DMA_CONTROLLER;
-
-#define DMA ((volatile DMA_CONTROLLER *)0x040000B0)
-
-// Defines
-#define DMA_CHANNEL_0 0
-#define DMA_CHANNEL_1 1
-#define DMA_CHANNEL_2 2
-#define DMA_CHANNEL_3 3
-
-#define DMA_DESTINATION_INCREMENT (0 << 21)
-#define DMA_DESTINATION_DECREMENT (1 << 21)
-#define DMA_DESTINATION_FIXED (2 << 21)
-#define DMA_DESTINATION_RESET (3 << 21)
-
-#define DMA_SOURCE_INCREMENT (0 << 23)
-#define DMA_SOURCE_DECREMENT (1 << 23)
-#define DMA_SOURCE_FIXED (2 << 23)
-
-#define DMA_REPEAT (1 << 25)
-
-#define DMA_16 (0 << 26)
-#define DMA_32 (1 << 26)
-
-#define DMA_NOW (0 << 28)
-#define DMA_AT_VBLANK (1 << 28)
-#define DMA_AT_HBLANK (2 << 28)
-#define DMA_AT_REFRESH (3 << 28)
-
-#define DMA_IRQ (1 << 30)
-#define DMA_ON (1 << 31)
-
-// ---------------------------------------------------------------------------
 //                       VBLANK
 // ---------------------------------------------------------------------------
-#define SCANLINECOUNTER (*(volatile unsigned short *)0x4000006)
 
 // Use this variable to count vBlanks. Initialized in gba.c and to be
 // manipulated by waitForVBlank()
@@ -170,10 +167,10 @@ int randint(int min, int max);
 // ---------------------------------------------------------------------------
 void setPixel(int row, int col, u16 color);
 void drawRectDMA(int row, int col, int width, int height, volatile u16 color);
-void drawRectDMA32(int row, int col, int width, int height, volatile u16 color);
+void drawRectDMA(int row, int col, int width, int height, volatile u16 color);
 void drawFullScreenImageDMA(const u16 *image);
 void drawImageDMA(int row, int col, int width, int height, const u16 *image);
-void drawImageDMA32(int row, int col, int width, int height, const u16 *image);
+void drawImageDMA(int row, int col, int width, int height, const u16 *image);
 void undrawImageDMA(int row, int col, int width, int height, const u16 *image);
 void fillScreenDMA(volatile u16 color);
 void drawChar(int row, int col, char ch, u16 color);

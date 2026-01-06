@@ -1,50 +1,28 @@
-PROGNAME = Sandtris
-OFILES := $(shell find . -name '*.c' | sed 's/\.c/\.o/g')
+SHARED_INCLUDE_DIR = ../shared/
+USER_INCLUDE_DIR = ../user/include
+CC = clang
+LD = ld.lld
+CFLAGS = -target i386-elf -std=c23 -m32 -ffreestanding -fno-builtin -O2 -Wall -Wextra -Wpedantic -nostdlib -mno-sse -I $(USER_INCLUDE_DIR) -I $(SHARED_INCLUDE_DIR) -nostdinc -g
+LDFLAGS = -m elf_i386 -nostdlib -T ../user.ld
 
-.PHONY: all
-all: $(PROGNAME).gba
-	@echo "[FINISH] Created $(PROGNAME).gba"
+ASSET_DIR = assets
+SRCS = $(wildcard *.c) $(wildcard $(ASSET_DIR)/*.c)
 
-GCC_VERSION = $(shell arm-none-eabi-gcc -dumpversion)
-LINKSCRIPT_DIR = ./cs2110-tools
+OBJS = $(SRCS:.c=.o)
 
-CROSS   := arm-none-eabi-
-AS      := $(CROSS)as
-CC      := $(CROSS)gcc
-LD      := $(CROSS)ld
-OBJCOPY := $(CROSS)objcopy
+TARGET = sandtris
 
-ARMINC = /usr/arm-none-eabi/include
-ARMLIB = /usr/arm-none-eabi/lib
-GCCLIB = /usr/lib/gcc/arm-none-eabi/$(GCC_VERSION)
+all: $(TARGET)
 
-CRELEASE = -O2
-LDRELEASE = -s
+$(TARGET): $(OBJS)
+	$(LD) $(LDFLAGS) -o $(TARGET) $(OBJS)
 
-MODEL   = -mthumb-interwork -mthumb
-CFLAGS  = -Wall -Werror -std=c99 -pedantic -Wextra -fno-common $(MODEL) -mlong-calls -I $(ARMINC) -g
-LDFLAGS = -nostartfiles -lc -lgcc -L $(ARMLIB) \
-	  -L $(ARMLIB)/thumb \
-	  -L $(GCCLIB) \
-	  -T $(LINKSCRIPT_DIR)/arm-gba.ld
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-crt0.o : $(LINKSCRIPT_DIR)/crt0.s
-	@$(AS) $(MODEL) $^ -o crt0.o
-
-LDFLAGS += --specs=nosys.specs
-
-# Adjust default compiler warnings and errors
-CFLAGS += -Wstrict-prototypes -Wold-style-definition -Werror=vla
-CFLAGS += -O2
-
-$(PROGNAME).gba: clean $(PROGNAME).elf
-	@echo "[LINK] Linking objects together to create $(PROGNAME).gba"
-	@$(OBJCOPY) -O binary $(PROGNAME).elf $(PROGNAME).gba
-
-$(PROGNAME).elf: crt0.o $(GCCLIB)/crtbegin.o $(GCCLIB)/crtend.o $(GCCLIB)/crti.o $(GCCLIB)/crtn.o $(OFILES)
-	$(CC) -o $(PROGNAME).elf $^ $(LDFLAGS)
-
-.PHONY: clean
+# Clean up the object files and the executable
 clean:
-	@echo "[CLEAN] Removing all compiled files"
-	rm -f *.o *.elf *.gba *.log */*.o *.sav */*/*.sav client
+	rm -f $(OBJS) $(TARGET)
+
+# Ensure 'clean' is not treated as a file
+.PHONY: all clean

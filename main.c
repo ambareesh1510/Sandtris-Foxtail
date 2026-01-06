@@ -1,36 +1,31 @@
-#include "main.h"
+#include "syscall_defs.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
-#include "assets/bg.h"
-
-#include "audio.h"
 #include "game.h"
 #include "gba.h"
 
-#include "assets/combo1.h"
-
 int dbgs = 0, dbge = 0;
 
-int main(void) {
-    // Manipulate REG_DISPCNT here to set Mode 3. //
-    REG_DISPCNT = BG2_ENABLE | MODE3;
-
-
+void _start() {
+    int graphics_res = set_graphics_mode(true);
+    if (graphics_res != 0) {
+        char fail[] = "Failed to enable graphics mode\n";
+        write(0, fail, sizeof(fail));
+        exit(1);
+    }
+    set_tty_mode(TTY_MODE_SCANCODE);
+    initVideoBuffer();
+    // bool once = false;
     while (1) {
         // input polling
         key_poll();
 
         // game logic
         run();
-
-        /*char s[16];*/
-        /*int p = dbge < dbgs ? 228 + dbge - dbgs : dbge - dbgs;*/
-        /*sprintf(s, "%d", p);*/
-        /*undrawImageDMA(8, 0, 56, 8, bg);*/
-        /*drawString(8, 0, s, COL_CYAN);*/
+        presentVideoBuffer();
+        wait_ticks(1000 / 60);
     }
+    set_tty_mode(TTY_MODE_COOKED);
+    set_graphics_mode(false);
 
-    return 0;
+    exit(0);
 }
